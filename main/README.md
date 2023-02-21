@@ -6,9 +6,9 @@
 
 # Area of improvements:
 
-1. When the client becomes a server, cannot send message anymore.
-2. For now, to prevent multiple servers exist at the same time, one client becomes randomly selected to become a server.
-3. When a client send a message, he will see his message twice.
+1. When the client becomes a server, it cannot send message anymore.
+2. For now, to prevent multiple servers existing at the same time, one client becomes randomly selected to become a server.
+3. When a client sends a message, he will see his message twice.
 
 # References
 
