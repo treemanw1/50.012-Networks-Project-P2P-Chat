@@ -24,14 +24,13 @@ class Server:
         sock.bind(("0.0.0.0", 10000))
         sock.listen(1)
         print("Server running ...")
-
         while True:
-            c, a = sock.accept()
+            c, a = sock.accept() # blocking method
             cThread = threading.Thread(target=self.handler, args=(c, a))
             cThread.daemon = True
             cThread.start()
             self.connections.append(c)
-            self.peers.append(a[0])
+            self.peers.append(a[0]) # appends IP address
             print(str(a[0]) + ":" + str(a[1]), "connected")
             self.sendPeers()
 
@@ -55,11 +54,11 @@ class Server:
             connection.send(b'\x11'+bytes(p,'utf-8'))
 
 class Client:
-    
 
     def sendMsg(self,sock):
         while True:
             sock.send(bytes(input(""), "utf-8"))
+            sys.stdout.write("\033[F")
 
     def __init__(self, address):
         sock = socket(AF_INET, SOCK_STREAM)
@@ -79,7 +78,7 @@ class Client:
                 self.updatePeers(data[1:])
             else:
                 print(str(data, "utf-8"))
-    def updatePeers(self,peerData):
+    def updatePeers(self, peerData):
         p2p.peers = str(peerData,"utf-8").split(",")[:-1]
 
 class p2p:
@@ -103,12 +102,12 @@ while True:
             # Temp solution
             # To prevent every one to become a server if not run same computer
             if randint(1,5) == 1:
-
                 try:
                     server = Server()
                 except KeyboardInterrupt:
                     sys.exit(0)
-                except:
+                except Exception as e:
+                    print(e)
                     print("Couldn't start the server ...")
     except KeyboardInterrupt:
         sys.exit(0)
