@@ -20,7 +20,7 @@ class Server:
         print("Server running ...")
 
         # Thread waiting for input to send to all connected clients
-        sThread = threading.Thread(target=self.sendMsg, args=())
+        sThread = threading.Thread(target=self.sendMsg, args=(sock,))
         sThread.daemon = True
         sThread.start()
 
@@ -30,7 +30,7 @@ class Server:
             with self.condition:
                 if stop_server_threads:
                     break
-            c, a = sock.accept(timeout=1) # blocking method
+            c, a = sock.accept() # blocking method
             cThread = threading.Thread(target=self.handler, args=(c, a))
             cThread.daemon = True
             cThread.start()
@@ -59,11 +59,15 @@ class Server:
                 break
         print('HANDLER END')
     
-    def sendMsg(self, ):
+    def sendMsg(self, sock):
         global stop_server_threads
         while True:
-            msg = input("")
-
+            try:
+                msg = input("")
+            except:
+                print("\nKeyboardInterrupt detected. Closing connection.")
+                sock.close()
+                break
             if msg.lower() == 'exit':
                 # # might need to perform some cleanup here
                 # print('condition met')
@@ -92,8 +96,13 @@ class Client:
 
     def sendMsg(self,sock):
         while True:
-            sock.send(bytes(input(""), "utf-8")) # blocking function
-            sys.stdout.write("\033[F")
+            try:
+                sock.send(bytes(input(""), "utf-8")) # blocking function
+                sys.stdout.write("\033[F")
+            except:
+                print("\nKeyboardInterrupt detected. Closing connection.")
+                sock.close()
+                break
 
     def __init__(self, address):
         sock = socket(AF_INET, SOCK_STREAM)
