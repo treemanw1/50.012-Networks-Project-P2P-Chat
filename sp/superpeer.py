@@ -1,9 +1,25 @@
+# edits on superpeer:
+# whoever starts first wiill become a "superpeer"
+# the ratio of superpeer to peers is 1:2
+# port for server must always be unique and starts from 60000 to ensure always empty port
+# when server closes unexpectedly, the peer becomes superpeer sequentially
+# sendtrack()
+# is_port_in_used()
+# prompt "client disconnected" at the proper place in main while loop
+#
+#  Areas of improvement:
+# superpeers needs to connect to other superpeers
+# change sequential promotion of peer to superpeers to be based on processing power instead (or some metrics)
+#
+# THINGS TO NOTE:
+# "EXCEPT: PASS" BYPASSES ALL ERRORS, THEREFORE WHEN DEBUGGING/CODING, MIGHT WANT TO REMOVE IT TO ALLOW CATCHING OF ERRORS
+
+
 import threading
 import sys
 import time
 from random import randint
 from socket import *
-# import socket
 
 stop_server_threads = False
 presentpeers = []  # take into account how many peers after current client
@@ -39,7 +55,6 @@ class Server:
         sThread.daemon = True
         sThread.start()
 
-        # TO DO: catch KeyboardInterrupt at blocking method
         while True:
             # while not stop_server_threads:
             with self.condition:
@@ -56,29 +71,15 @@ class Server:
             self.ipAndPort.append(str(a[0]) + ":" + str(a[1]))
             print(self.ipAndPort)
             print(str(a[0]) + ":" + str(a[1]), "connected")
-            # accThread = threading.Thread(target=self.sendtrack, args=(sock,))
-            # accThread.daemon = True
-            # accThread.start()
             self.sendtrack()
             # self.sendPeers() # unless not localhost
         print('MAIN END')
 
+    # send ip and port to peer with unique header to filter recv data
     def sendtrack(self):
         if not stop_server_threads:
             data = str(self.ipAndPort)
             self.connections[-1].send(b'\x10'+bytes(data, 'utf-8'))
-        # while True:
-        #     try:
-        #         print("the data at server: ", self.ipAndPort)
-        #         data = str(self.ipAndPort)
-        #         self.connections[-1].send(b'\x10'+bytes(data, 'utf-8'))
-        #         # send current list of connections
-        #         print("sent data")
-
-        #     except KeyboardInterrupt:
-        #         sock.close()
-        #     except:
-        #         pass
 
     def handler(self, c, a):
         while True:
@@ -132,8 +133,6 @@ class Server:
                 p = p+peer+","
             for connection in self.connections:
                 connection.send(b'\x11'+bytes(p, 'utf-8'))
-            # data = str(self.ipAndPort)
-            # self.connections[-1].send(b'\x10'+bytes(data, 'utf-8'))
 
 
 class Client:
@@ -203,19 +202,6 @@ class p2p:
     peers = ['127.0.0.1']
 
 
-# if len(sys.argv) > 1:
-#     client = Client(sys.argv[1])
-# else:
-#     server = Server()
-# while True:
-#     try:
-#         server = Server()
-#     except KeyboardInterrupt:
-#         sys.exit(0)
-#     except Exception as e:
-#         print("Couldn't start the server ...")
-#         print(e)
-
 while True:
     try:
         print("Trying to connect ...")
@@ -248,30 +234,3 @@ while True:
                     print(e)
     except KeyboardInterrupt:
         sys.exit(0)
-
-# while True:
-#     try:
-#         print("Trying to connect ...")
-#         time.sleep(randint(1,5))
-
-#         if len(p2p.peers) == 0:
-#             try:
-#                 p2p.peers = [socket.gethostbyname(socket.gethostname())]
-#                 print('hostname: ', socket.gethostname())
-#                 print('IP: ', socket.gethostbyname(socket.gethostname()))
-#                 server = Server()
-#             except KeyboardInterrupt:
-#                 sys.exit(0)
-#             except:
-#                 print("Couldn't start the server ...")
-#         else:
-#             for peer in p2p.peers:
-#                 try:
-#                     print('number of peers: ', len(p2p.peers))
-#                     client = Client(peer)
-#                 except KeyboardInterrupt:
-#                     sys.exit(0)
-#                 except:
-#                     pass
-#     except KeyboardInterrupt:
-#         sys.exit(0)
