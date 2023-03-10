@@ -37,6 +37,7 @@ class Server:
 
         sock = socket(AF_INET, SOCK_STREAM)
         # sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        # starting from port 60000, try to connect to free port
         for i in range(60000, 65535):
             try:
                 sock.bind(("0.0.0.0", i))
@@ -51,6 +52,7 @@ class Server:
         # print(serverls)
 
         # Thread waiting for input to send to all connected clients
+        # args require (var,) to recognise correct type
         sThread = threading.Thread(target=self.sendMsg, args=(sock,))
         sThread.daemon = True
         sThread.start()
@@ -60,19 +62,21 @@ class Server:
             with self.condition:
                 if stop_server_threads:
                     break
+            # c - connection, a - ip address
             c, a = sock.accept()  # blocking method
             cThread = threading.Thread(target=self.handler, args=(c, a))
             cThread.daemon = True
             cThread.start()
             if len(self.connections) == 2:
                 c.close()
-            self.connections.append(c)
+            self.connections.append(c)  # append connection
             self.peers.append(a[0])  # appends IP address
+            # record down number of connections so far, for sequential promotion of superpeer
             self.ipAndPort.append(str(a[0]) + ":" + str(a[1]))
             print(self.ipAndPort)
             print(str(a[0]) + ":" + str(a[1]), "connected")
             self.sendtrack()
-            # self.sendPeers() # unless not localhost
+            # self.sendPeers() # uncomment if not localhost
         print('MAIN END')
 
     # send ip and port to peer with unique header to filter recv data
@@ -81,6 +85,7 @@ class Server:
             data = str(self.ipAndPort)
             self.connections[-1].send(b'\x10'+bytes(data, 'utf-8'))
 
+    #  for communicating with every other peers
     def handler(self, c, a):
         while True:
             data = c.recv(1024)  # blocking method
@@ -136,7 +141,7 @@ class Server:
 
 
 class Client:
-
+    # check if port is connected/used
     def is_port_in_use(self, port):
         with socket(AF_INET, SOCK_STREAM) as s:
             try:
@@ -180,9 +185,11 @@ class Client:
             if not data:
                 print("not data")
                 break
+            # header bit filter to upfate peers
             if data[0:1] == b'\x11':
                 self.updatePeers(data[1:])
                 print("x11: ", data[1:])
+            # header bit filter to update presentpeers
             elif data[0:1] == b'\x10':
                 print("yay")
                 global presentpeers
