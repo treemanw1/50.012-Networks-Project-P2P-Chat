@@ -14,6 +14,13 @@
 # THINGS TO NOTE:
 # "EXCEPT: PASS" BYPASSES ALL ERRORS, THEREFORE WHEN DEBUGGING/CODING, MIGHT WANT TO REMOVE IT TO ALLOW CATCHING OF ERRORS
 
+# 17/3/2023
+# Added listening socket to class Server and put the handler thread properly so connection is filtered out first before the thread is running
+# Whats done :
+# 1. 2 server can connect to each other
+# 2. Now its possible to have superpeer A connected to 2 clients and superpeer B connected to 2 other clients and A and B are connected
+# THINGS TO NOTE:
+# Ensure connection is not closed before sending data
 
 import threading
 import sys
@@ -25,7 +32,8 @@ stop_server_threads = False
 presentpeers = []  # take into account how many peers after current client
 serverls = []
 
-
+# Must bind between 60000 <= listening port no <= 61000
+# Must bind between 61001 <= CONNECTING port no <= 62000
 class Server:
 
     connections = []
@@ -33,38 +41,45 @@ class Server:
     ipAndPort = []
     rejectedClient = []
 
+    client_counter = 0
+
     def __init__(self):
         self.condition = threading.Condition()
 
         sock = socket(AF_INET, SOCK_STREAM)
-        sock2 = socket(AF_INET, SOCK_STREAM)
-        # sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        connecting_sock = socket(AF_INET, SOCK_STREAM)
+
         # starting from port 60000, try to connect to free port
         for i in range(60000, 61000):
             try:
-                sock.bind(("0.0.0.0", i))
-                print('nicholas')
+                sock.bind(("127.0.0.1", i))
+                print(f'listening socket is succesfully binded at {i} \n')
                 break
             except:
                 print(f"cannot bind port at {i}")
         currentPort = sock.getsockname()
+        print(f"current port is {currentPort}")
         sock.listen(1)
-        sock2.connect(('127.0.0.1', 60000))
-        print(f"Server running ... with {currentPort}")
-        # global serverls
-        # serverls.append()
-        # print(serverls)
+
+        # bind connecting socket from 61001 to 62000
+        for j in range(61001, 62000):
+            try:
+                connecting_sock.bind(("0.0.0.0", j))
+                print(f'connecting socket is succesfully binded at {j} \n')
+                break
+            except:
+                print(f"cannot bind port at {j}")
+        try:
+            connecting_sock.connect(('127.0.0.1', int(currentPort[1])-1)) # TODO : now only server 2 connects to server 1
+        except WindowsError:
+            pass
+        print(f"Server running ... with listening socket {currentPort} and connecting socket {connecting_sock.getsockname()}")
 
         # Thread waiting for input to send to all connected clients
         # args require (var,) to recognise correct type
         sThread = threading.Thread(target=self.sendMsg, args=(sock,))
         sThread.daemon = True
         sThread.start()
-
-        # servertoserverThread = threading.Thread(
-        #     target=self.sendDatatoServer, args=(sock2,))
-        # servertoserverThread.daemon = True
-        # servertoserverThread.start()
 
         while True:
             # while not stop_server_threads:
@@ -73,19 +88,36 @@ class Server:
                     break
             # c - connection, a - ip address
             c, a = sock.accept()  # blocking method
-            cThread = threading.Thread(target=self.handler, args=(c, a))
-            cThread.daemon = True
-            cThread.start()
-            if len(self.connections) == 2:
-                self.rejectedClient.append(a)
-                c.close()
-            self.connections.append(c)  # append connection
-            self.peers.append(a[0])  # appends IP address
-            # record down number of connections so far, for sequential promotion of superpeer
-            self.ipAndPort.append(str(a[0]) + ":" + str(a[1]))
-            print(self.ipAndPort)
-            print(str(a[0]) + ":" + str(a[1]), "connected")
-            self.sendtrack()
+            print(f"socket accpet c : {c} and a : {a}")
+            
+            print("ine 90")
+            incoming_socket = a[1]
+            print("ine 92")
+            
+            if incoming_socket > 62000:
+                print("ine 95")
+                if self.client_counter + 1 > 2:
+                    print("before close")
+                    c.close()
+                    print("after close")
+                
+                else:
+                    print("ine 102")
+                    self.connections.append(c)  # append connection
+                    self.peers.append(a[0])  # appends IP address
+
+                    cThread = threading.Thread(target=self.handler, args=(c, a))
+                    cThread.daemon = True
+                    cThread.start()
+
+                    # record down number of connections so far, for sequential promotion of superpeer
+                    self.ipAndPort.append(str(a[0]) + ":" + str(a[1]))
+                    print(self.ipAndPort)
+                    print(str(a[0]) + ":" + str(a[1]), "connected")
+                    self.sendtrack()
+                    
+                self.client_counter += 1
+                       
             # self.sendPeers() # uncomment if not localhost
         print('MAIN END')
 
@@ -113,7 +145,13 @@ class Server:
     #  for communicating with every other peers
     def handler(self, c, a):
         while True:
-            data = c.recv(1024)  # blocking method
+            data = bytes([])
+            if not isinstance(c, socket):
+                return 
+            try:
+                data = c.recv(1024)  # blocking method
+            except:
+                pass
             if data:
                 print(str(data, "utf-8"))
             with self.condition:
@@ -126,6 +164,7 @@ class Server:
                 print(str(a[0]) + ":" + str(a[1]), "disconnected")
                 self.connections.remove(c)
                 self.peers.remove(a[0])
+                self.client_counter -= 1
                 c.close()
                 self.sendPeers()
                 break
@@ -136,10 +175,13 @@ class Server:
         while True:
             try:
                 msg = input("")
-            except:
+            except KeyboardInterrupt:
                 print("\nKeyboardInterrupt detected. Closing connection.")
                 sock.close()
                 break
+            except Exception as e:
+                print(e)
+
             if msg.lower() == 'exit':
                 # # might need to perform some cleanup here
                 # print('condition met')
@@ -157,20 +199,20 @@ class Server:
         print('SENDMSG END')
 
     def sendPeers(self):
+
         if not stop_server_threads:
             p = ""
             for peer in self.peers:
                 p = p+peer+","
             for connection in self.connections:
-                connection.send(b'\x11'+bytes(p, 'utf-8'))
-
+                connection.send(b'\x11'+bytes(p, 'utf-8')) 
 
 class Client:
     # check if port is connected/used
     def is_port_in_use(self, port):
         with socket(AF_INET, SOCK_STREAM) as s:
             try:
-                s.bind(("0.0.0.0", port))
+                s.bind(("127.0.0.1", port))
             except OSError:
                 return True
             else:
@@ -181,23 +223,56 @@ class Client:
             try:
                 sock.send(bytes(input(""), "utf-8"))  # blocking function
                 sys.stdout.write("\033[F")
-            except:
+            except KeyboardInterrupt:
                 print("\nKeyboardInterrupt detected. Closing connection.")
                 sock.close()
                 break
+            except Exception as e:
+                print(f'Client error : {e}')
 
     def __init__(self, address):
+        # Client Socket must be binded to 62001 <= socket <= 65535
         sock = socket(AF_INET, SOCK_STREAM)
-        sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        for i in range(60000, 65535):
-            bool = self.is_port_in_use(i)
-            print("bool: ", bool)
-            if bool:
-                sock.connect((address, i))
-                print(f"Client running ... with {address}:{i}")
+        # sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
+        for j in range(62001, 65535):
+            try:
+                sock.bind(("127.0.0.1", j))
+                print(f'Client socket is succesfully binded at {j} \n')
                 break
-            else:
-                print(f"cannot connect to server at port {i}")
+            except:
+                print(f"Client cannot bind port at {j}")
+        currentPort = sock.getsockname()
+        print(f"sock fileno : {sock.fileno()}")
+        # if sock.fileno() != -1:
+        #     print(f" socket is connected to : {sock.getpeername()}")
+        for i in range(60000, 60005):
+            # bool = self.is_port_in_use(i)
+            # if bool:
+            try:
+                print(f"Trying to connect to {i} ...")
+                sock.connect(('127.0.0.1', i))
+                print(f"Client running ... with {address}:{i}")
+
+                data = sock.recv(1024)
+                if not data:
+                    print("Server forcibly closed connection with the client")
+                    sock.close()
+                    sock = socket(AF_INET, SOCK_STREAM)
+                    sock.bind(("127.0.0.1", int(currentPort[1])))
+                    continue
+                else:
+                    break
+                
+            except ConnectionResetError:
+                print('The connection was forcibly closed by the server')
+            
+            except Exception as e:
+                print(e)
+                print(f"Connection to {i} failed")
+                continue
+            # else:
+            #     print(f"cannot connect to server at port {i}")
 
         # thread to wait for input, send message to server
         iThread = threading.Thread(target=self.sendMsg, args=(sock,))
@@ -243,7 +318,8 @@ while True:
                 client = Client(peer)
             except KeyboardInterrupt:
                 sys.exit(0)
-            except:
+            except Exception as e:
+                print(e)
                 pass
             print("client disconnected")
 
