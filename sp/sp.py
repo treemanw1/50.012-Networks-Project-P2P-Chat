@@ -22,11 +22,16 @@
 # THINGS TO NOTE:
 # Ensure connection is not closed before sending data
 
+# \x10 = 
+# \x11 =
+# \x12 = data sent between superpeer
+
 import threading
 import sys
 import time
 from random import randint
 from socket import *
+import json
 
 stop_server_threads = False
 presentpeers = []  # take into account how many peers after current client
@@ -41,6 +46,7 @@ class Server:
     ipAndPort = [] # Store ip and Port of connected peers for possible promotion if the superpeer crashes
     othersuperpeersport = [] # Store port of other super peer
     othersuperpeerssocket = [] # Store socket object / connection of other super peer
+    SPDict = {} # key = port of superpeer ; value = port of peer
 
     client_counter = 0 # Counter to keep track how many clients are connected to current superpeer
 
@@ -49,6 +55,7 @@ class Server:
 
         sock = socket(AF_INET, SOCK_STREAM) # Socket to listen for incoming request ( acts as a server )
         connecting_sock = socket(AF_INET, SOCK_STREAM) # Socket to connect to other super peer ( to relay / send data )
+        connecting_sock2 = socket(AF_INET, SOCK_STREAM)
 
         # starting from port 60000, try to bind to free port
         for i in range(60000, 61000):
@@ -59,6 +66,7 @@ class Server:
             except:
                 print(f"cannot bind port at {i}")
         currentPort = sock.getsockname()
+        self.SPDict = dict.fromkeys([f'{currentPort}'])
         print(f"current port is {currentPort}")
         sock.listen(1)
 
@@ -66,54 +74,40 @@ class Server:
         for j in range(61001, 62000):
             try:
                 connecting_sock.bind(("0.0.0.0", j))
+                connecting_sock2.bind(("0.0.0.0", j+1))
                 print(f'connecting socket is succesfully binded at {j} \n')
                 break
             except:
                 print(f"cannot bind port at {j}")
-        try:
-            connecting_sock.connect(('127.0.0.1', int(currentPort[1])-1)) # TODO : now only server 2 connects to server 1 and not both ways
-        except WindowsError:
-            pass
+        
+        connectingThread1 = threading.Thread (daemon=True, target = self.connect,  args=(connecting_sock,int(currentPort[1]-1),)).start()
+        connectingThread2 = threading.Thread (daemon=True, target = self.connect, args=(connecting_sock2,int(currentPort[1]+1),)).start()
         print(f"Server running ... with listening socket {currentPort} and connecting socket {connecting_sock.getsockname()}")
 
         # Thread waiting for input to send to all connected clients
         # args require (var,) to recognise correct type
-        sThread = threading.Thread(target=self.sendMsg, args=(sock,))
-        sThread.daemon = True
-        sThread.start()
+        sThread = threading.Thread(daemon=True, target=self.sendMsg, args=(sock,)).start()
 
-        # sendMsgSuperpeerThread = threading.Thread(target=self.sendsuperpeerMsg)
-        # sendMsgSuperpeerThread.daemon = True
-        # sendMsgSuperpeerThread.start()
+        updateThread = threading.Thread(daemon=True, target=self.sendConnectedSP, args=(self.othersuperpeerssocket,)).start()
 
         while True:
-            # while not stop_server_threads:
-            with self.condition:
-                if stop_server_threads:
-                    break
             # c - connection, a - ip address
             c, a = sock.accept()  # blocking method
             print(f"\nSocket accept c : {c} and a : {a}")
             
-            print("ine 90")
             incoming_socket = a[1]
-            print("ine 92")
             
             # Check if the incoming connection is Client
             if incoming_socket > 62000:
-                print("ine 95")
                 # Auto kick client if no of client connected to current super peer is already 2
                 if self.client_counter + 1 > 2:
-                    print("before close")
                     c.close()
-                    print("after close")
                 
                 else:
-                    print("ine 102")
                     self.connections.append(c)  # append connection
                     self.peers.append(a[0])  # appends IP address
-
-                    cThread = threading.Thread(target=self.handler, args=(c, a))
+                    
+                    cThread = threading.Thread(target=self.handler, args=(c, a,currentPort,))
                     cThread.daemon = True
                     cThread.start()
 
@@ -131,35 +125,65 @@ class Server:
                 self.othersuperpeerssocket.append(c) # append connection of other superpeer
                 self.othersuperpeersport.append(a[1]) # appends port of other superpeer
                 print("before super peer thread")
-                superpeerThread = threading.Thread(target=self.superpeerhandler, args=(c, a))
-                superpeerThread.daemon = True
-                superpeerThread.start()
+                superpeerThread = threading.Thread(daemon=True, target=self.superpeerhandler, args=(c, a)).start()
                 print("after super peer thread")
 
             # self.sendPeers() # uncomment if not localhost
         print('MAIN END')
 
+    def sendConnectedSP(self,SPPeersDict):
+        time.sleep(randint(5,10))
+        currentDict = json.dumps(SPPeersDict)
+        print(f"currentSPDict : {currentDict}")
+        # p = ""
+        # for superpeer in SPPeersDict:
+        #     p = p+superpeer+","
+        for superpeerconnection in self.othersuperpeerssocket:
+            superpeerconnection.send(b'\x12'+bytes(currentDict, 'utf-8')) 
+        pass
+
+    def connect(self,sock,port):
+        while True:
+            try:
+                sock.connect(('127.0.0.1', port)) # TODO : now only server 2 connects to server 1 and not both ways
+                print(f"connected to {port}")
+                self.othersuperpeerssocket.append(sock)
+            except error as err:
+                # Socket is already connected
+                if err.errno == 10056:
+                    time.sleep(2)
+                    print(f"Socket is already connected to {port}") 
+                    break
+                # Connection refused error / no server exists at that port
+                if err.errno == 10061:
+                    print("Connection refused")
+                else:
+                    print(f"Error is {err}")
+            time.sleep(5)
+
+    
     #  for communicating with other superpeer
     def superpeerhandler(self, c, a):
         print("Super peer handler thread starts")
-        c.settimeout(5)
 
         while True:
             data = bytes([])
-            print("before if not")
             if not isinstance(c, socket):
                 return 
-            print("before try")
             try:
                 data = c.recv(1024)  # blocking method
-            except timeout:
-                print("Socket timed out while receiving data")
-                pass
             except:
                 print("except data" + str(data, "utf-8"))
                 pass
-            print("after except")
-            if data:
+
+            # From superpeer
+            if data[0:1] == b'\x12':
+                self.SPDict = json.load(data[1:]) # Update currentSPDict
+                print("x12: ", data[1:])
+                
+            # From peers
+            elif data:
+                time.sleep(2)
                 print(str(data, "utf-8"))
             with self.condition:
                 if stop_server_threads:
@@ -167,45 +191,14 @@ class Server:
             print("before connection")
             for connection in self.othersuperpeerssocket:
                 connection.send(data)
-            if not data:
-                print("superpeer " + str(a[0]) + ":" + str(a[1]), "disconnected")
+            # if not data:
+            #     print("superpeer " + str(a[0]) + ":" + str(a[1]), "disconnected")
                 # self.othersuperpeerssocket.remove(c)
                 # self.othersuperpeersport.remove(a[1])
                 
                 # c.close()
                 # break
         print('Super peer HANDLER END')
-
-    # for sending msg to other super peer
-    # def sendsuperpeerMsg(self):
-        # global stop_server_threads
-        # print('SUPER PEER SENDMSG STARTS')
-        # while True:
-        #     try:
-        #         msg = input("")
-        #     except KeyboardInterrupt:
-        #         print("\nKeyboardInterrupt detected. Closing connection.")
-        #         break
-
-        #     except Exception as e:
-        #         print(e)
-
-        #     if msg.lower() == 'exit':
-        #         # # might need to perform some cleanup here
-        #         # print('condition met')
-        #         # stop_server_threads = True
-        #         # sys.exit(0)
-
-        #         with self.condition:
-        #             global stop_server_threads
-        #             stop_server_threads = True
-        #             self.condition.notify_all()
-        #         break
-        #     data = bytes(msg, "utf-8")
-        #     print('BEFORE CONNECTION IN SEND SUPERPEERMSG')
-        #     for connection in self.othersuperpeerssocket:
-        #         connection.send(data)
-        # print('SUPER PEER SENDMSG END')
 
     # send ip and port to peer with unique header to filter recv data
     def sendtrack(self):
@@ -214,7 +207,8 @@ class Server:
             self.connections[-1].send(b'\x10'+bytes(data, 'utf-8'))
 
     # for communicating with every other peers
-    def handler(self, c, a):
+    def handler(self, c, a ,currentPort):
+        self.SPDict[currentPort] = self.ipAndPort
         while True:
             data = bytes([])
             if not isinstance(c, socket):
@@ -223,20 +217,24 @@ class Server:
                 data = c.recv(1024)  # blocking method
             except:
                 pass
-            if data:
+
+            if data[0:1] != b'\x12':
                 print(str(data, "utf-8"))
+
             with self.condition:
                 if stop_server_threads:
                     break
 
             for connection in self.connections:
                 connection.send(data)
+
             if not data:
                 print(str(a[0]) + ":" + str(a[1]), "disconnected")
                 self.connections.remove(c)
                 self.peers.remove(a[0])
                 self.client_counter -= 1
                 c.close()
+                self.SPDict[currentPort] = self.ipAndPort
                 self.sendPeers()
                 break
         print('HANDLER END')
@@ -356,9 +354,7 @@ class Client:
             #     print(f"cannot connect to server at port {i}")
 
         # thread to wait for input, send message to server
-        iThread = threading.Thread(target=self.sendMsg, args=(sock,))
-        iThread.daemon = True
-        iThread.start()
+        iThread = threading.Thread(daemon=True, target=self.sendMsg, args=(sock,)).start()
 
         while True:
             data = sock.recv(1024)
@@ -392,34 +388,38 @@ class p2p:
 
 while True:
     try:
-        print("Trying to connect ...")
-        time.sleep(randint(1, 3))
-        for peer in p2p.peers:
-            try:
-                client = Client(peer)
-            except KeyboardInterrupt:
-                sys.exit(0)
-            except Exception as e:
-                print(e)
-                pass
-            print("client disconnected")
+        server=Server()
+    except Exception as e:
+        print(e)
+    # try:
+    #     print("Trying to connect ...")
+    #     time.sleep(randint(1, 3))
+    #     for peer in p2p.peers:
+    #         try:
+    #             client = Client(peer)
+    #         except KeyboardInterrupt:
+    #             sys.exit(0)
+    #         except Exception as e:
+    #             print(e)
+    #             pass
+    #         print("client disconnected")
 
-            try:
-                presentpeers.pop(0)
-            except:
-                pass
+    #         try:
+    #             presentpeers.pop(0)
+    #         except:
+    #             pass
 
-            if len(presentpeers) == 0:
+    #         if len(presentpeers) == 0:
 
-                # Temp solution
-                # To prevent every one to become a server if not run same computer
-                # if randint(1, 3) == 1:
-                try:
-                    server = Server()
-                except KeyboardInterrupt:
-                    sys.exit(0)
-                except Exception as e:
-                    print("Couldn't start the server ...")
-                    print(e)
-    except KeyboardInterrupt:
-        sys.exit(0)
+    #             # Temp solution
+    #             # To prevent every one to become a server if not run same computer
+    #             # if randint(1, 3) == 1:
+    #             try:
+    #                 server = Server()
+    #             except KeyboardInterrupt:
+    #                 sys.exit(0)
+    #             except Exception as e:
+    #                 print("Couldn't start the server ...")
+    #                 print(e)
+    # except KeyboardInterrupt:
+    #     sys.exit(0)
